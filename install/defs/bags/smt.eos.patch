@@ -1,0 +1,266 @@
+--- smt.eos
++++ smt.eos
+@@ -47,6 +47,7 @@
+ (define-macro smt.char (c)          ($vsm_Char c))
+ (define-macro smt.map (m)           ($vsm_Map m))
+ (define-macro smt.set (m)           ($vsm_Set m))
++(define-macro smt.bag (m)           ($vsm_Bag m))
+ 
+ ; The values of that family the embedding names for themselves. A whole number
+ ; is not among them: 0 and 1 at value level are already what they denote.
+@@ -60,6 +61,7 @@
+ (define-macro smt.bit_false ()      $vsm_binary_bit_false)
+ 
+ (define-macro smt.map_empty_set (T) ($msm_default T smt.false))
++(define-macro smt.map_empty_bag (T) ($msm_default T (smt.numeral 0)))
+ 
+ (define-macro smt.map_update (m i e)
+   ($smtx_map_update_aux ($smtx_map_get_default m) m i e))
+@@ -263,6 +265,24 @@
+   :wf ($smtx_type_wf_component_rec T)
+   :bounded ("and" ("not" u) ($smtx_type_bounded uc u T))
+   :default (smt.set (smt.map_empty_set T)))
++
++; -- $smtx_map_to_bag_type
++; A bag is a mapping to its multiplicities, so the type of one is read off the
++; map it is.
++(program $smtx_map_to_bag_type ((T SmtType))
++  :signature (SmtType) SmtType
++  (
++  (($smtx_map_to_bag_type (Map T Int)) (Bag T))
++  (($smtx_map_to_bag_type T) none)
++  )
++)
++
++; A bag is a map to the multiplicities of its elements, which are unbounded, so
++; it is neither unit nor finite, even over a finite type.
++(define-sort Bag (T)
++  :wf ($smtx_type_wf_component_rec T)
++  :bounded "false"
++  :default (smt.bag (smt.map_empty_bag T)))
+ 
+ ; -- $smtx_typeof_seq_value
+ ; Returns the type of the sequence value or tsm_none
+@@ -893,6 +913,28 @@
+   :canonical ("and" ($smtx_map_canonical uc m)
+                ("veq" ($smtx_map_get_default m) smt.false)))
+ 
++; -- $smtx_bag_counts_pos
++; Whether every multiplicity a map stores is a positive numeral.
++(program $smtx_bag_counts_pos
++  ((T SmtType) (i SmtValue) (e SmtValue) (d SmtValue) (n <numeral>) (m SmtMap))
++  :signature (SmtMap) <bool>
++  (
++  (($smtx_bag_counts_pos ($msm_default T d)) "true")
++  (($smtx_bag_counts_pos ($msm_cons i (smt.numeral n) m))
++    ("and" ("zlt" 0 n) ($smtx_bag_counts_pos m)))
++  (($smtx_bag_counts_pos ($msm_cons i e m)) "false")
++  )
++)
++
++; A bag is a map to the multiplicities of its elements, so it is canonical when
++; the map is, when what it maps the rest to is zero, and when every
++; multiplicity it stores is positive.
++(declare-constructor Bag ((m SmtMap)) :builds SmtValue
++  :typeof ($smtx_map_to_bag_type ($smtx_typeof_map_value m))
++  :canonical ("and" ($smtx_map_canonical uc m)
++               ("and" ("veq" ($smtx_map_get_default m) (smt.numeral 0))
++                 ($smtx_bag_counts_pos m))))
++
+ (declare-constructor Seq ((s SmtSeq)) :builds SmtValue
+   :typeof ($smtx_typeof_seq_value s)
+   :canonical ($smtx_seq_canonical uc s))
+@@ -1338,6 +1380,8 @@
+   (($smtx_typeof_map_diff (Map T1 U1) (Map T2 U2))
+     ("ite" ("and" ("Teq" T1 T2) ("Teq" U1 U2)) T1 none))
+   (($smtx_typeof_map_diff (Set T1) (Set T2))
++    ("ite" ("Teq" T1 T2) T1 none))
++  (($smtx_typeof_map_diff (Bag T1) (Bag T2))
+     ("ite" ("Teq" T1 T2) T1 none))
+   (($smtx_typeof_map_diff T1 T2) none)
+   )
+@@ -1359,6 +1403,7 @@
+   (
+   (($smtx_map_diff M (smt.map m1) (smt.map m2)) ("eval_map_diff" M m1 m2))
+   (($smtx_map_diff M (smt.set m1) (smt.set m2)) ("eval_map_diff" M m1 m2))
++  (($smtx_map_diff M (smt.bag m1) (smt.bag m2)) ("eval_map_diff" M m1 m2))
+   (($smtx_map_diff M v1 v2)                     smt.not_value)
+   )
+ )
+@@ -2296,7 +2341,176 @@
+ (define-symbol set.subset (a b)
+   :typeof ($smtx_typeof_sets_op_2_ret a b Bool)
+   :eval (a b) (= (set.inter a b) a))
++
++
++;-----------------------------------------------------------------------------
++(section "Bags")
++;-----------------------------------------------------------------------------
++
++; Bags.
++;
++; A bag is a map from its elements to their multiplicities, which are positive
++; numerals, and it maps everything else to zero. Every operator that builds a
++; bag from two others is computed pointwise, from the multiplicities an
++; element has in its arguments, by the program $smtx_bag_combine, so they all
++; share one walk over the maps, $smtx_bag_op_rec. The programs and the type
++; rules the symbols name come first.
++
++; The multiplicity a value of a bag stands for: the numeral it is, and zero for
++; anything else, which no canonical bag stores.
++(program $smtx_bag_mult ((n <numeral>) (v SmtValue))
++  :signature (SmtValue) <numeral>
++  (
++  (($smtx_bag_mult (smt.numeral n)) n)
++  (($smtx_bag_mult v) 0)
++  )
++)
++
++; The multiplicity an element has in the result of the operator named by k,
++; given the multiplicities c1 and c2 it has in the arguments:
++;   0  bag.union_disjoint      c1 + c2
++;   1  bag.union_max           max(c1, c2)
++;   2  bag.inter_min           min(c1, c2)
++;   3  bag.difference_subtract c1 - c2 if c1 >= c2, and 0 otherwise
++;   4  bag.difference_remove   c1 if c2 <= 0, and 0 otherwise
++;   5  bag.setof               1 if c1 >= 1, and 0 otherwise
++; Each is zero when both multiplicities are zero, which is what makes a walk
++; over the elements stored in the arguments enough.
++(program $smtx_bag_combine ((k <numeral>) (c1 <numeral>) (c2 <numeral>))
++  :signature (<numeral> <numeral> <numeral>) <numeral>
++  (
++  (($smtx_bag_combine k c1 c2)
++    ("ite" ("zeq" k 0) ("zplus" c1 c2)
++    ("ite" ("zeq" k 1) ("ite" ("zlt" c2 c1) c1 c2)
++    ("ite" ("zeq" k 2) ("ite" ("zlt" c1 c2) c1 c2)
++    ("ite" ("zeq" k 3) ("ite" ("zleq" c2 c1) ("zplus" c1 ("zneg" c2)) 0)
++    ("ite" ("zeq" k 4) ("ite" ("zleq" c2 0) c1 0)
++      ("ite" ("zleq" 1 c1) 1 0)))))))
++  )
++)
++
++; The walk: for each element stored in m, set its multiplicity in acc to the
++; one the operator k gives it from m1 and m2.
++(program $smtx_bag_op_rec
++  ((k <numeral>) (T SmtType) (d SmtValue) (e SmtValue) (c SmtValue)
++   (m SmtMap) (m1 SmtMap) (m2 SmtMap) (acc SmtMap))
++  :signature (<numeral> SmtMap SmtMap SmtMap SmtMap) SmtMap
++  (
++  (($smtx_bag_op_rec k ($msm_default T d) m1 m2 acc) acc)
++  (($smtx_bag_op_rec k ($msm_cons e c m) m1 m2 acc)
++    ($smtx_bag_op_rec k m m1 m2
++      (smt.map_update acc e
++        (smt.numeral ($smtx_bag_combine k
++          ($smtx_bag_mult ($smtx_map_lookup m1 e))
++          ($smtx_bag_mult ($smtx_map_lookup m2 e)))))))
++  )
++)
+ 
++; The operator named by k, applied to two bag values: the walk over the
++; elements of both, starting from the empty bag.
++(program $smtx_bag_op
++  ((k <numeral>) (m1 SmtMap) (m2 SmtMap) (v1 SmtValue) (v2 SmtValue))
++  :signature (<numeral> SmtValue SmtValue) SmtValue
++  (
++  (($smtx_bag_op k (smt.bag m1) (smt.bag m2))
++    (smt.bag ($smtx_bag_op_rec k m2 m1 m2
++      ($smtx_bag_op_rec k m1 m1 m2
++        (smt.map_empty_bag ($smtx_index_typeof_map ($smtx_typeof_map_value m1)))))))
++  (($smtx_bag_op k v1 v2) smt.not_value)
++  )
++)
++
++; The bag holding x with multiplicity c, which is empty when c is not positive.
++(program $smtx_bag_make ((x SmtValue) (n <numeral>) (v SmtValue))
++  :signature (SmtValue SmtValue) SmtValue
++  (
++  (($smtx_bag_make x (smt.numeral n))
++    ("ite" ("zlt" 0 n)
++      (smt.bag ($msm_cons x (smt.numeral n) (smt.map_empty_bag (smt.typeof_value x))))
++      (smt.bag (smt.map_empty_bag (smt.typeof_value x)))))
++  (($smtx_bag_make x v) smt.not_value)
++  )
++)
++
++; The multiplicity of x in a bag value.
++(program $smtx_bag_count ((x SmtValue) (m SmtMap) (v SmtValue))
++  :signature (SmtValue SmtValue) SmtValue
++  (
++  (($smtx_bag_count x (smt.bag m)) ($smtx_map_lookup m x))
++  (($smtx_bag_count x v) smt.not_value)
++  )
++)
++
++; The type of a bag operator whose two arguments must be bags of one type.
++(program $smtx_typeof_bags_op_2 ((x1 SmtType) (x2 SmtType))
++  :signature (SmtType SmtType) SmtType
++  (
++  (($smtx_typeof_bags_op_2 (Bag x1) (Bag x2))
++    ("ite" ("Teq" x1 x2) (Bag x1) none))
++  (($smtx_typeof_bags_op_2 x1 x2) none)
++  )
++)
++
++(program $smtx_typeof_bags_op_1 ((x1 SmtType))
++  :signature (SmtType) SmtType
++  (
++  (($smtx_typeof_bags_op_1 (Bag x1)) (Bag x1))
++  (($smtx_typeof_bags_op_1 x1) none)
++  )
++)
++
++(program $smtx_typeof_bag ((x1 SmtType) (x2 SmtType))
++  :signature (SmtType SmtType) SmtType
++  (
++  (($smtx_typeof_bag x1 Int) ($smtx_typeof_guard_wf (Bag x1) (Bag x1)))
++  (($smtx_typeof_bag x1 x2) none)
++  )
++)
++
++(program $smtx_typeof_bag.count ((x1 SmtType) (x2 SmtType) (x3 SmtType) (x4 SmtType))
++  :signature (SmtType SmtType) SmtType
++  (
++  (($smtx_typeof_bag.count x1 (Bag x2)) ("ite" ("Teq" x1 x2) Int none))
++  (($smtx_typeof_bag.count x3 x4) none)
++  )
++)
++
++(define-symbol bag.empty ((! t :type))
++  :typeof ($smtx_typeof_guard_wf (Bag t) (Bag t))
++  :value (smt.bag (smt.map_empty_bag t)))
++
++(define-symbol bag (x c)
++  :typeof ($smtx_typeof_bag x c)
++  :eval (x c) ($smtx_bag_make x c))
++
++(define-symbol bag.count (x a)
++  :typeof ($smtx_typeof_bag.count x a)
++  :eval (x a) ($smtx_bag_count x a))
++
++(define-symbol bag.union_disjoint (a b)
++  :typeof ($smtx_typeof_bags_op_2 a b)
++  :eval (a b) ($smtx_bag_op 0 a b))
++
++(define-symbol bag.union_max (a b)
++  :typeof ($smtx_typeof_bags_op_2 a b)
++  :eval (a b) ($smtx_bag_op 1 a b))
++
++(define-symbol bag.inter_min (a b)
++  :typeof ($smtx_typeof_bags_op_2 a b)
++  :eval (a b) ($smtx_bag_op 2 a b))
++
++(define-symbol bag.difference_subtract (a b)
++  :typeof ($smtx_typeof_bags_op_2 a b)
++  :eval (a b) ($smtx_bag_op 3 a b))
++
++(define-symbol bag.difference_remove (a b)
++  :typeof ($smtx_typeof_bags_op_2 a b)
++  :eval (a b) ($smtx_bag_op 4 a b))
++
++(define-symbol bag.setof (a)
++  :typeof ($smtx_typeof_bags_op_1 a)
++  :eval (a) ($smtx_bag_op 5 a a))
++
+ ;-----------------------------------------------------------------------------
+ (section "The binders")
+ ;-----------------------------------------------------------------------------

@@ -23,6 +23,16 @@ globs = ["CpcMini", "CpcMini.Logos", "CpcMini.LogosTerm", "CpcMini.LogosTermOrde
 allowImportAll = true
 moreLeanArgs = ["-DwarningAsError=true"]
 
+# The bags extension: the calculus of the bag rules of cvc5, compiled with the
+# bag semantics of install/defs/bags. Not a default target; its semantics and
+# proofs are in verification/. See CpcBags/README.md.
+[[lean_lib]]
+name = "CpcBags"
+roots = []
+globs = ["CpcBags.Logos", "CpcBags.LogosTerm", "CpcBags.LogosTermOrder", "CpcBags.Parser", "CpcBags.SmtEval", "CpcBags.SmtSyntax", "CpcBags.SmtTyping", "CpcBags.SmtTranslate"]
+allowImportAll = true
+moreLeanArgs = ["-DmaxHeartbeats=10000000", "-DwarningAsError=true"]
+
 [[lean_exe]]
 name = "logos"
 root = "Main"

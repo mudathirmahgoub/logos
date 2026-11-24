@@ -1,0 +1,140 @@
+--- Cpc.eos
++++ Cpc.eos
+@@ -698,7 +698,85 @@
+ )
+ (define-symbol @sets_deq_diff (a b)
+   :term ($eo_to_smt_sets_deq_diff a (smt.typeof a) b (smt.typeof b)))
++
++;-----------------------------------------------------------------------------
++(section "Bags")
++;-----------------------------------------------------------------------------
++
++; Bags.
++;
++; The symbols the SMT-LIB semantics gives a meaning to transform pointwise, but
++; for bag.empty, which is written with the type of its elements and so
++; transforms through a program of its own, as set.empty does. bag.member and
++; bag.subbag have no meaning of their own to the model: each is eliminated into
++; the symbols above, the way the bags rewriter of cvc5 eliminates them. The
++; witness @bags_deq_diff of a disequality between two bags becomes map_diff, as
++; @sets_deq_diff does.
++;
++; The other symbols of the theory (bag.card, bag.choose, bag.is_singleton,
++; bag.filter, bag.map, bag.fold, the table operators and the remaining skolems)
++; are not given a meaning here, so a proof that mentions them is outside the
++; specified fragment.
++
++(program $eo_to_smt_bag.empty ((T SmtType))
++  :signature (SmtType) SmtTerm
++  (
++  (($eo_to_smt_bag.empty (Bag T)) (bag.empty T))
++  (($eo_to_smt_bag.empty T) none)
++  )
++)
++
++(program $eo_to_smt_bag_elem_type ((T SmtType))
++  :signature (SmtType) SmtType
++  (
++  (($eo_to_smt_bag_elem_type (Bag T)) T)
++  (($eo_to_smt_bag_elem_type T) none)
++  )
++)
++
++(define-symbol bag.empty ((! t :type))
++  :term ($eo_to_smt_bag.empty t))
++
++(define-symbol bag (x c))
++
++(define-symbol bag.count (x a))
++
++(define-symbol bag.union_disjoint (a b))
++
++(define-symbol bag.union_max (a b))
++
++(define-symbol bag.inter_min (a b))
++
++(define-symbol bag.difference_subtract (a b))
++
++(define-symbol bag.difference_remove (a b))
++
++(define-symbol bag.setof (a))
++
++; The symbols below have no meaning of their own to the model: each is
++; eliminated on the way to the SMT-LIB signature.
++
++; -- bag.member
++(define-symbol bag.member (x a)
++  :term (>= (bag.count x a) 1))
+ 
++; -- bag.subbag
++(define-symbol bag.subbag (a b)
++  :term (= (bag.difference_subtract a b)
++           (bag.empty ($eo_to_smt_bag_elem_type (smt.typeof a)))))
++
++; -- @bags_deq_diff
++(program $eo_to_smt_bags_deq_diff
++  ((a SmtTerm) (aT SmtType) (b SmtTerm) (bT SmtType))
++  :signature (SmtTerm SmtType SmtTerm SmtType) SmtTerm
++  (
++  (($eo_to_smt_bags_deq_diff a (Bag aT) b (Bag bT)) (map_diff a b))
++  (($eo_to_smt_bags_deq_diff a aT b bT) none)
++  )
++)
++(define-symbol @bags_deq_diff (a b)
++  :term ($eo_to_smt_bags_deq_diff a (smt.typeof a) b (smt.typeof b)))
++
+ ;-----------------------------------------------------------------------------
+ (section "Datatypes and tuples")
+ ;-----------------------------------------------------------------------------
+@@ -879,6 +957,41 @@
+ (define-symbol tuple.update (n t u)
+   :term ($eo_to_smt_tuple_update (smt.typeof t) n t u))
+ 
++; -- tuple.project
++; The tuple of the components of t at the indices, in order, and for no
++; indices the unit tuple:
++;   (tuple.project (@list 2 0) t)   ; is (tuple (tuple.select 2 t) (tuple.select 0 t))
++;   (tuple.project @list.nil t)     ; is (@purify tuple.unit), for t well typed
++; The second is purified so that no application becomes a constructor, as
++; @bvsize is so that none becomes a numeral. A non-empty projection ends in
++; tuple.unit itself, so it becomes what the tuple it is equal to becomes.
++(program $eo_to_smt_tuple_project_rec
++  ((T SmtType) (n <numeral>) (is $eo_List) (t SmtTerm))
++  :signature ($eo_List SmtType SmtTerm) SmtTerm
++  (
++  (($eo_to_smt_tuple_project_rec eo.list_nil T t)
++    (DtCons "str_tuple_name" (smt.decl_cons "str_tuple_name" (smt.datatype_cons smt.cons_unit smt.datatype_nil) smt.decl_nil) "n_zero"))
++  (($eo_to_smt_tuple_project_rec (eo.list_cons (eo.numeral n) is) T t)
++    (eo::define ((h ($eo_to_smt_tuple_select T (Numeral n) t)))
++      ($eo_to_smt_tuple_prepend h (smt.typeof h) ($eo_to_smt_tuple_project_rec is T t))))
++  (($eo_to_smt_tuple_project_rec is T t) none)
++  )
++)
++
++(program $eo_to_smt_tuple_project
++  ((T SmtType) (is $eo_List) (t SmtTerm))
++  :signature ($eo_List SmtType SmtTerm) SmtTerm
++  (
++  (($eo_to_smt_tuple_project eo.list_nil T t)
++    ("ite" ("Teq" T none) none
++      (@purify (DtCons "str_tuple_name" (smt.decl_cons "str_tuple_name" (smt.datatype_cons smt.cons_unit smt.datatype_nil) smt.decl_nil) "n_zero"))))
++  (($eo_to_smt_tuple_project is T t) ($eo_to_smt_tuple_project_rec is T t))
++  )
++)
++
++(define-symbol tuple.project ((! is :raw) t)
++  :term ($eo_to_smt_tuple_project is (smt.typeof t) t))
++
+ ;-----------------------------------------------------------------------------
+ (section "Quantifiers, skolems, and lambda")
+ ;-----------------------------------------------------------------------------
+@@ -1060,6 +1173,9 @@
+ (define-symbol Set (T)
+   :type (guard T (Set T)))
+ 
++(define-symbol Bag (T)
++  :type (guard T (Bag T)))
++
+ (define-symbol Array (I E)
+   :type (guard I (guard E (Array I E))))
+ 

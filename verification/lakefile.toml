@@ -40,3 +40,10 @@ name = "CpcMiniVerification"
 roots = []
 globs = ["CpcMini.Spec", "CpcMini.SmtReal", "CpcMini.SmtModelDefs", "CpcMini.SmtValueOrder", "CpcMini.SmtModel", "CpcMini.Proofs.+"]
 moreLeanArgs = ["-DwarningAsError=true"]
+
+# The bags extension, see CpcBags/README.md. Not a default target.
+[[lean_lib]]
+name = "CpcBagsVerification"
+roots = []
+globs = ["CpcBags", "CpcBags.Spec", "CpcBags.SmtReal", "CpcBags.SmtModelDefs", "CpcBags.SmtValueOrder", "CpcBags.SmtModel", "CpcBags.Proofs.SmtValueOrder", "CpcBags.Proofs.BagMaps", "CpcBags.Proofs.BagRules", "CpcBags.Proofs.BagExt"]
+moreLeanArgs = ["-DmaxHeartbeats=10000000", "-DwarningAsError=true"]

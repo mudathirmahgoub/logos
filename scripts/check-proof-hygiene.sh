@@ -11,7 +11,7 @@ readonly forbidden_pattern="(^|[^[:alnum:]_'])(sorry|admit|axiom)([^[:alnum:]_']
 # or `Lean.ofReduceNat`) rather than the kernel: `native_decide`,
 # `decide +native`, `bv_decide`, and the axioms themselves.
 readonly native_pattern="(^|[^[:alnum:]_'])(native_decide|bv_decide|ofReduceBool|ofReduceNat|reduceBool|reduceNat)([^[:alnum:]_'?!]|$)|[+]native([^[:alnum:]_']|$)|native[[:space:]]*:=[[:space:]]*true"
-readonly source_dirs=(Cpc CpcMini)
+readonly source_dirs=(Cpc CpcMini CpcBags)
 
 for source_dir in "${source_dirs[@]}"; do
   if [ ! -d "${source_dir}" ]; then
@@ -26,7 +26,7 @@ while IFS= read -r -d '' source_file; do
 done < <(find "${source_dirs[@]}" -type f -name '*.lean' -print0)
 
 if [ "${#source_files[@]}" -eq 0 ]; then
-  echo "error: no Lean source files found under Cpc or CpcMini" >&2
+  echo "error: no Lean source files found under Cpc, CpcMini or CpcBags" >&2
   exit 1
 fi
 
@@ -49,11 +49,11 @@ check_absent() {
 }
 
 check_absent "${forbidden_pattern}" \
-  "forbidden proof escape hatch found in Cpc or CpcMini
+  "forbidden proof escape hatch found in Cpc, CpcMini or CpcBags
 Remove every standalone 'sorry', 'admit', and 'axiom' token, including occurrences in comments."
 
 check_absent "${native_pattern}" \
-  "proof by native evaluation found in Cpc or CpcMini
+  "proof by native evaluation found in Cpc, CpcMini or CpcBags
 'native_decide', 'decide +native' and 'bv_decide' add Lean.ofReduceBool, which trusts the
 compiler and every @[extern]/@[implemented_by] implementation. Use 'decide +kernel' (or 'decide',
 'rfl', 'simp') so the proof is checked by the kernel alone."

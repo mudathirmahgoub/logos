@@ -53,7 +53,7 @@ run_examples() {
 }
 
 run_proof_hygiene() {
-  echo "Checking Cpc and CpcMini for proof escape hatches..."
+  echo "Checking Cpc, CpcMini and CpcBags for proof escape hatches..."
   bash scripts/check-proof-hygiene.sh
 }
 
@@ -174,6 +174,17 @@ run_cpcmini() {
   lake -d verification build "${targets[@]}"
 }
 
+# The bags extension (CpcBags/README.md): its generated checker, and the
+# semantics and soundness proofs of the bag rules.
+run_cpcbags() {
+  echo "Compiling the CpcBags checker..."
+  lake build CpcBags
+
+  echo
+  echo "Compiling the CpcBags proofs..."
+  lake -d verification build CpcBagsVerification
+}
+
 group="${1:-all}"
 case "${group}" in
   regressions)
@@ -187,6 +198,10 @@ case "${group}" in
   cpcmini)
     configure_lean_toolchain
     run_cpcmini
+    ;;
+  cpcbags)
+    configure_lean_toolchain
+    run_cpcbags
     ;;
   checker-boundary)
     configure_lean_toolchain
@@ -209,10 +224,11 @@ case "${group}" in
     run_regressions
     run_cpc_proofs
     run_cpcmini
+    run_cpcbags
     python3 scripts/check-checker-boundary.py --build
     ;;
   *)
-    echo "Usage: $0 [all|regressions|cpc-proofs|cpcmini|checker-boundary|proof-hygiene|proof-modularity|regeneration]" >&2
+    echo "Usage: $0 [all|regressions|cpc-proofs|cpcmini|cpcbags|checker-boundary|proof-hygiene|proof-modularity|regeneration]" >&2
     exit 2
     ;;
 esac
